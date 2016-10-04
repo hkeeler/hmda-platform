@@ -38,42 +38,36 @@ trait LarHttpApi extends LarProtocol with ValidationResultProtocol with HmdaCust
   implicit val timeout: Timeout
 
   val parseLarRoute =
-    pathPrefix("lar") {
-      path("parse") {
-        timedPost {
-          entity(as[String]) { s =>
-            LarCsvParser(s) match {
-              case Right(lar) => complete(ToResponseMarshallable(lar))
-              case Left(errors) => complete(errorsAsResponse(errors))
-            }
+    path("parse") {
+      post {
+        entity(as[String]) { s =>
+          LarCsvParser(s) match {
+            case Right(lar) => complete(ToResponseMarshallable(lar))
+            case Left(errors) => complete(errorsAsResponse(errors))
           }
         }
       }
     }
 
   val validateLarRoute =
-    pathPrefix("lar") {
-      path("validate") {
-        parameters('check.as[String] ? "all") { (checkType) =>
-          timedPost {
-            entity(as[LoanApplicationRegister]) { lar =>
-              validateRoute(lar, checkType)
-            }
+    path("validate") {
+      parameters('check.as[String] ? "all") { (checkType) =>
+        post {
+          entity(as[LoanApplicationRegister]) { lar =>
+            validateRoute(lar, checkType)
           }
         }
       }
     }
 
   val parseAndValidateLarRoute =
-    pathPrefix("lar") {
-      path("parseAndValidate") {
-        parameters('check.as[String] ? "all") { (checkType) =>
-          timedPost {
-            entity(as[String]) { s =>
-              LarCsvParser(s) match {
-                case Right(lar) => validateRoute(lar, checkType)
-                case Left(errors) => complete(errorsAsResponse(errors))
-              }
+    path("parseAndValidate") {
+      parameters('check.as[String] ? "all") { (checkType) =>
+        post {
+          entity(as[String]) { s =>
+            LarCsvParser(s) match {
+              case Right(lar) => validateRoute(lar, checkType)
+              case Left(errors) => complete(errorsAsResponse(errors))
             }
           }
         }
@@ -114,6 +108,10 @@ trait LarHttpApi extends LarProtocol with ValidationResultProtocol with HmdaCust
     HttpResponse(StatusCodes.BadRequest, entity = errorEntity)
   }
 
-  val larRoutes = parseLarRoute ~ validateLarRoute ~ parseAndValidateLarRoute
+  val larRoutes = pathPrefix("lar") {
+    parseLarRoute ~
+      validateLarRoute ~
+      parseAndValidateLarRoute
+  }
 
 }

@@ -16,7 +16,7 @@ class HttpApiSpec extends WordSpec with MustMatchers with ScalatestRouteTest wit
   "Http API service" must {
 
     "return OK for GET requests to the root path" in {
-      Get() ~> routes ~> check {
+      Get() ~> baseRoutes ~> check {
         responseAs[Status].status mustBe "OK"
         responseAs[Status].service mustBe "hmda-api"
       }

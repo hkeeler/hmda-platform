@@ -40,8 +40,10 @@ object HmdaApi
   createInstitutions(system)
   createLocalHmdaEventProcessor(system)
 
+  val routes = time { baseRoutes ~ larRoutes ~ institutionsRoutes }
+
   val http = Http().bindAndHandle(
-    routes ~ larRoutes ~ institutionsRoutes,
+    routes,
     host,
     port
   )

@@ -2,6 +2,7 @@ package hmda.api.http
 
 import java.net.InetAddress
 import java.time.Instant
+
 import akka.actor.ActorSystem
 import akka.event.LoggingAdapter
 import akka.http.scaladsl.marshalling.ToResponseMarshallable
@@ -20,7 +21,7 @@ trait HttpApi extends HmdaApiProtocol with HmdaCustomDirectives {
 
   val rootPath =
     pathSingleSlash {
-      timedGet {
+      get {
         complete {
           val now = Instant.now.toString
           val host = InetAddress.getLocalHost.getHostName
@@ -31,5 +32,6 @@ trait HttpApi extends HmdaApiProtocol with HmdaCustomDirectives {
       }
     }
 
-  val routes = rootPath
+  val baseRoutes = rootPath
+
 }

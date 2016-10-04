@@ -40,26 +40,24 @@ trait InstitutionsHttpApi extends InstitutionProtocol with ApiErrorProtocol with
 
   val institutionsPath =
     path("institutions") {
-      val path = "institutions"
       val institutionsActor = system.actorSelection("/user/institutions")
-      timedGet {
+      get {
         val fInstitutions = (institutionsActor ? GetState).mapTo[Set[Institution]]
         onComplete(fInstitutions) {
           case Success(institutions) =>
             val wrappedInstitutions = institutions.map(inst => InstitutionWrapper(inst.id.toString, inst.name, inst.status))
             complete(ToResponseMarshallable(Institutions(wrappedInstitutions)))
-          case Failure(error) => completeWithInternalError(path, error)
+          case Failure(error) => failWith(error)
         }
       }
     }
 
   val institutionByIdPath =
     path("institutions" / Segment) { institutionId =>
-      val path = s"institutions/$institutionId"
       extractExecutionContext { executor =>
         val institutionsActor = system.actorSelection("/user/institutions")
         val filingsActor = system.actorOf(FilingPersistence.props(institutionId))
-        timedGet {
+        get {
           implicit val ec: ExecutionContext = executor
           val fInstitutionDetails = institutionDetails(institutionId, institutionsActor, filingsActor)
           onComplete(fInstitutionDetails) {
@@ -69,11 +67,12 @@ trait InstitutionsHttpApi extends InstitutionProtocol with ApiErrorProtocol with
                 complete(ToResponseMarshallable(institutionDetails))
               else {
                 val errorResponse = ErrorResponse(404, s"Institution $institutionId not found", path)
-                complete(ToResponseMarshallable(StatusCodes.NotFound -> errorResponse))
+                //complete(ToResponseMarshallable(StatusCodes.NotFound -> errorResponse))
+                reject(Rejection)
               }
             case Failure(error) =>
               filingsActor ! Shutdown
-              completeWithInternalError(path, error)
+              failWith(error)
           }
         }
       }
@@ -81,11 +80,10 @@ trait InstitutionsHttpApi extends InstitutionProtocol with ApiErrorProtocol with
 
   val filingByPeriodPath =
     path("institutions" / Segment / "filings" / Segment) { (institutionId, period) =>
-      val path = s"institutions/$institutionId/filings/$period"
       extractExecutionContext { executor =>
         val filingsActor = system.actorOf(FilingPersistence.props(institutionId))
         val submissionActor = system.actorOf(SubmissionPersistence.props(institutionId, period))
-        timedGet {
+        get {
           implicit val ec: ExecutionContext = executor
           val fDetails: Future[FilingDetail] = filingDetailsByPeriod(period, filingsActor, submissionActor)
           onComplete(fDetails) {
@@ -102,7 +100,7 @@ trait InstitutionsHttpApi extends InstitutionProtocol with ApiErrorProtocol with
             case Failure(error) =>
               filingsActor ! Shutdown
               submissionActor ! Shutdown
-              completeWithInternalError(path, error)
+              failWith(error)
           }
         }
       }
@@ -110,8 +108,7 @@ trait InstitutionsHttpApi extends InstitutionProtocol with ApiErrorProtocol with
 
   val submissionPath =
     path("institutions" / Segment / "filings" / Segment / "submissions") { (institutionId, period) =>
-      val path = s"institutions/$institutionId/filings/$period/submissions"
-      timedPost {
+      post {
         implicit val ec = system.dispatcher
         val filingsActor = system.actorOf(FilingPersistence.props(institutionId))
         val submissionsActor = system.actorOf(SubmissionPersistence.props(institutionId, period))
@@ -128,7 +125,7 @@ trait InstitutionsHttpApi extends InstitutionProtocol with ApiErrorProtocol with
                   complete(ToResponseMarshallable(StatusCodes.Created -> submission))
                 case Failure(error) =>
                   submissionsActor ! Shutdown
-                  completeWithInternalError(path, error)
+                  failWith(error)
               }
             } else {
               val errorResponse = ErrorResponse(404, s"$period filing not found for institution $institutionId", path)
@@ -137,62 +134,58 @@ trait InstitutionsHttpApi extends InstitutionProtocol with ApiErrorProtocol with
           case Failure(error) =>
             filingsActor ! Shutdown
             submissionsActor ! Shutdown
-            completeWithInternalError(path, error)
+            failWith(error)
         }
       }
     }
 
   val uploadPath =
     path("institutions" / Segment / "filings" / Segment / "submissions" / Segment) { (institutionId, period, submissionId) =>
-      time {
-        val path = s"institutions/$institutionId/filings/$period/submissions/$submissionId"
-        extractExecutionContext { executor =>
-          val uploadTimestamp = Instant.now.toEpochMilli
-          val processingActor = createHmdaRawFile(system, submissionId)
-          val submissionsActor = system.actorOf(SubmissionPersistence.props(institutionId, period))
-          implicit val ec: ExecutionContext = executor
-          val fIsSubmissionOverwrite = checkSubmissionOverwrite(submissionsActor, submissionId.toInt)
-          onComplete(fIsSubmissionOverwrite) {
-            case Success(false) =>
-              submissionsActor ! Shutdown
-              processingActor ! StartUpload
-              fileUpload("file") {
-                case (metadata, byteSource) if (metadata.fileName.endsWith(".txt")) =>
-                  val uploadedF = byteSource
-                    .via(splitLines)
-                    .map(_.utf8String)
-                    .runForeach(line => processingActor ! AddLine(uploadTimestamp, line))
+      extractExecutionContext { executor =>
+        val uploadTimestamp = Instant.now.toEpochMilli
+        val processingActor = createHmdaRawFile(system, submissionId)
+        val submissionsActor = system.actorOf(SubmissionPersistence.props(institutionId, period))
+        implicit val ec: ExecutionContext = executor
+        val fIsSubmissionOverwrite = checkSubmissionOverwrite(submissionsActor, submissionId.toInt)
+        onComplete(fIsSubmissionOverwrite) {
+          case Success(false) =>
+            submissionsActor ! Shutdown
+            processingActor ! StartUpload
+            fileUpload("file") {
+              case (metadata, byteSource) if (metadata.fileName.endsWith(".txt")) =>
+                val uploadedF = byteSource
+                  .via(splitLines)
+                  .map(_.utf8String)
+                  .runForeach(line => processingActor ! AddLine(uploadTimestamp, line))
 
-                  onComplete(uploadedF) {
-                    case Success(response) =>
-                      processingActor ! CompleteUpload
-                      processingActor ! Shutdown
-                      complete(ToResponseMarshallable(StatusCodes.Accepted -> "uploaded"))
-                    case Failure(error) =>
-                      processingActor ! Shutdown
-                      log.error(error.getLocalizedMessage)
-                      val errorResponse = ErrorResponse(400, "Invalid File Format", path)
-                      complete(ToResponseMarshallable(StatusCodes.BadRequest -> errorResponse))
-                  }
-                case _ =>
-                  processingActor ! Shutdown
-                  val errorResponse = ErrorResponse(400, "Invalid File Format", path)
-                  complete(ToResponseMarshallable(StatusCodes.BadRequest -> errorResponse))
-              }
-            case Success(true) =>
-              val errorResponse = ErrorResponse(400, "Submission already exists", path)
-              complete(ToResponseMarshallable(StatusCodes.BadRequest -> errorResponse))
-            case Failure(error) =>
-              submissionsActor ! Shutdown
-              completeWithInternalError(path, error)
-          }
+                onComplete(uploadedF) {
+                  case Success(response) =>
+                    processingActor ! CompleteUpload
+                    processingActor ! Shutdown
+                    complete(ToResponseMarshallable(StatusCodes.Accepted -> "uploaded"))
+                  case Failure(error) =>
+                    processingActor ! Shutdown
+                    log.error(error.getLocalizedMessage)
+                    val errorResponse = ErrorResponse(400, "Invalid File Format", path)
+                    complete(ToResponseMarshallable(StatusCodes.BadRequest -> errorResponse))
+                }
+              case _ =>
+                processingActor ! Shutdown
+                val errorResponse = ErrorResponse(400, "Invalid File Format", path)
+                complete(ToResponseMarshallable(StatusCodes.BadRequest -> errorResponse))
+            }
+          case Success(true) =>
+            val errorResponse = ErrorResponse(400, "Submission already exists", path)
+            complete(ToResponseMarshallable(StatusCodes.BadRequest -> errorResponse))
+          case Failure(error) =>
+            submissionsActor ! Shutdown
+            failWith(error)
         }
       }
     }
 
   val institutionSummaryPath =
     path("institutions" / Segment / "summary") { institutionId =>
-      val path = s"institutions/$institutionId/summary"
       extractExecutionContext { executor =>
         val institutionsActor = system.actorSelection("/user/institutions")
         val filingsActor = system.actorOf(FilingPersistence.props(institutionId))
@@ -211,7 +204,7 @@ trait InstitutionsHttpApi extends InstitutionProtocol with ApiErrorProtocol with
               complete(ToResponseMarshallable(summary))
             case Failure(error) =>
               filingsActor ! Shutdown
-              completeWithInternalError(path, error)
+              failWith(error)
           }
         }
       }
@@ -238,15 +231,16 @@ trait InstitutionsHttpApi extends InstitutionProtocol with ApiErrorProtocol with
     submission.map(_.submissionStatus != Created)
   }
 
+  /*
   private def completeWithInternalError(path: String, error: Throwable): StandardRoute = {
     log.error(error.getLocalizedMessage)
     val errorResponse = ErrorResponse(500, "Internal server error", path)
     complete(ToResponseMarshallable(StatusCodes.InternalServerError -> errorResponse))
-
   }
+  */
 
   val institutionsRoutes =
-    hmdaAuthorize {
+    (pathPrefix("institutions") & extractUri & hmdaAuthorize) { uri: Uri =>
       institutionsPath ~
         institutionByIdPath ~
         institutionSummaryPath ~
