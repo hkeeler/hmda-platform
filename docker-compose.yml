@@ -12,12 +12,10 @@ services:
     depends_on:
       - query_db
     environment:
-      JDBC_URL: jdbc:postgresql://192.168.99.100:54321/hmda?user=postgres&password=postgres
+      JDBC_URL: 'jdbc:postgresql://192.168.99.100:54321/hmda?user=postgres&password=postgres'
 
   ui:
     build: ../hmda-platform-ui
-    ports:
-      - "80:80"
     depends_on:
       - api
       - auth_proxy
@@ -25,30 +23,30 @@ services:
     volumes:
       - ../hmda-platform-ui/dist:/usr/src/app/dist
     environment:
-      APP_URL: http://192.168.99.100
-      HMDA_API: https://192.168.99.100:4443/hmda
-      KEYCLOAK_URL: https://192.168.99.100:8443/auth/realms/hmda
+      APP_URL: 'https://192.168.99.100'
+      HMDA_API: 'https://192.168.99.100:4443/hmda'
+      KEYCLOAK_URL: 'https://192.168.99.100:8443/auth/realms/hmda'
 
   keycloak:
     build: ../hmda-platform-auth/keycloak
-    ports:
-      - '8080:8080'
-      - '8443:8443'
     environment:
-      KEYCLOAK_USER: admin
-      KEYCLOAK_PASSWORD: admin
-      POSTGRES_DB: keycloak
-      POSTGRES_USER: keycloak
-      POSTGRES_PASSWORD: password
-      POSTGRES_SERVER: keycloak_db
+      KEYCLOAK_USER: 'admin'
+      KEYCLOAK_PASSWORD: 'admin'
+      POSTGRES_DB: 'keycloak'
+      POSTGRES_USER: 'keycloak'
+      POSTGRES_PASSWORD: 'password'
+      POSTGRES_SERVER: 'keycloak_db'
       POSTGRES_PORT: 5432
-      INSTITUTION_SEARCH_URI: https://192.168.99.100:9443
-      INSTITUTION_SEARCH_VALIDATE_SSL: "OFF"
-      HOME_PAGE_URI: http://192.168.99.100
-      REDIRECT_URIS: '[ "http://192.168.99.100", "http://192.168.99.100/oidc-callback", "http://192.168.99.100/silent_renew.html" ]'
+      INSTITUTION_SEARCH_URI: 'https://192.168.99.100:9443'
+      INSTITUTION_SEARCH_VALIDATE_SSL: 'OFF'
+      HOME_PAGE_URI: 'http://192.168.99.100'
+      REDIRECT_URIS: '[ "https://192.168.99.100", "https://192.168.99.100/oidc-callback", "https://192.168.99.100/silent_renew.html" ]'
       SUPPORT_EMAIL: 'support@localhost.localdomain'
-    volumes:
-      - '../hmda-platform-auth/keycloak/themes/hmda:/opt/jboss/keycloak/themes/hmda'
+    
+    # Volumes disabled to prevent theme.properties file from being modified by container
+    # SEE: https://github.com/cfpb/hmda-platform-auth/issues/41
+    #volumes:
+    #  - '../hmda-platform-auth/keycloak/themes/hmda:/opt/jboss/keycloak/themes/hmda'
     #  - '../hmda-platform-auth/keycloak/import:/opt/jboss/import'
 
     # Set action to "export" to dump Keycloak realm data
@@ -67,29 +65,38 @@ services:
   keycloak_db:
     image: postgres:9.6.1
     environment:
-      POSTGRES_DB: keycloak
-      POSTGRES_USER: keycloak
-      POSTGRES_PASSWORD: password
+      POSTGRES_DB: 'keycloak'
+      POSTGRES_USER: 'keycloak'
+      POSTGRES_PASSWORD: 'password'
 
   auth_proxy:
     build: ../hmda-platform-auth/auth-proxy
     ports:
-      - '4443:8443' # Auth Proxy
-      - '9443:9443' # Institution Search
+      - '443:2000'  # UI
+      - '4443:8000' # Auth Proxy
+      - '8443:8443' # Keycloak
+      - '9443:9443' # Public API (Institution Search)
     environment:
-      OIDC_METADATA_URI: https://keycloak:8443/auth/realms/hmda/.well-known/openid-configuration
-      OIDC_JWKS_URI: https://keycloak:8443/auth/realms/hmda/protocol/openid-connect/certs
-      OIDC_CLIENT_ID: api
-      OIDC_REDIRECT_URI: https://192.168.99.100:8443
-      CRYPTO_PASSPHRASE: abcdefghijklmnopqrstuvwxyz
-      VALIDATE_SSL: "Off"
-      CLAIM_HEADER_PREFIX: CFPB-HMDA-
-      REMOTE_USER_CLAIM: preferred_username
-      REMOTE_USER_HEADER: CFPB-HMDA-Username
-      FILING_API_UPSTREAM_URI: http://api:8080/
-      FILING_API_PATH_PREFIX: /hmda/
-      PUBLIC_API_UPSTREAM_URI: http://api:8082/
-      LOG_LEVEL: info
+      LOG_LEVEL: 'info'
+      SSL_ENGINE: 'ON'
+
+      # Dev env settings
+      PUBLIC_API_UPSTREAM_URI: 'http://api:8082/'
+      UI_UPSTREAM_URI: 'http://ui:8080/'
+      KEYCLOAK_UPSTREAM_URI: 'http://keycloak:8080/'
+
+      # Standard auth-proxy settings
+      FILING_API_UPSTREAM_URI: 'http://api:8080/'
+      FILING_API_PATH_PREFIX: '/hmda/'
+      OIDC_METADATA_URI: 'https://keycloak:8443/auth/realms/hmda/.well-known/openid-configuration'
+      OIDC_JWKS_URI: 'https://keycloak:8443/auth/realms/hmda/protocol/openid-connect/certs'
+      OIDC_CLIENT_ID: 'api'
+      OIDC_REDIRECT_URI: 'https://192.168.99.100:8443'
+      OIDC_CRYPTO_PASSPHRASE: 'abcdefghijklmnopqrstuvwxyz'
+      OIDC_VALIDATE_SSL: 'OFF'
+      OIDC_CLAIM_HEADER_PREFIX: 'CFPB-HMDA-'
+      OIDC_REMOTE_USER_CLAIM: 'preferred_username'
+      OIDC_REMOTE_USER_HEADER: 'CFPB-HMDA-Username'
     links:
       - api
       - keycloak
@@ -104,7 +111,7 @@ services:
     ports:
       - '54321:5432'
     environment:
-      POSTGRES_DB: hmda
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: 'hmda'
+      POSTGRES_USER: 'postgres'
+      POSTGRES_PASSWORD: 'postgres'
 
