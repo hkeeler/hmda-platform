@@ -37,6 +37,8 @@ services:
       POSTGRES_PASSWORD: 'password'
       POSTGRES_SERVER: 'keycloak_db'
       POSTGRES_PORT: 5432
+      SMTP_SERVER: 'mail_dev'
+      SMTP_PORT: 1080
       INSTITUTION_SEARCH_URI: 'https://192.168.99.100:9443'
       INSTITUTION_SEARCH_VALIDATE_SSL: 'OFF'
       HOME_PAGE_URI: 'https://192.168.99.100'
