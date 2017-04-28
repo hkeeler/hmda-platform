@@ -10,10 +10,11 @@ import hmda.persistence.messages.CommonMessages._
 import hmda.persistence.model.ActorSpec
 import hmda.persistence.processing.HmdaFileParser._
 import hmda.persistence.processing.HmdaFileValidator._
-import hmda.persistence.processing.ProcessingMessages.{ BeginValidation, ValidationCompletedWithErrors }
+import hmda.persistence.processing.ProcessingMessages.{ BeginValidation, Persisted, ValidationCompletedWithErrors }
 import hmda.persistence.processing.SingleLarValidation._
 import hmda.validation.engine._
 import org.scalatest.BeforeAndAfterEach
+import hmda.validation.ValidationStats._
 
 class HmdaFileValidatorSpec extends ActorSpec with BeforeAndAfterEach with HmdaFileParserSpecUtils {
   import hmda.model.util.FITestData._
@@ -25,6 +26,8 @@ class HmdaFileValidatorSpec extends ActorSpec with BeforeAndAfterEach with HmdaF
   val larValidator = system.actorSelection(createSingleLarValidator(system).path)
 
   val hmdaFileParser = createHmdaFileParser(system, submissionId2)
+
+  val validationStats = createValidationStats(system)
 
   var hmdaFileValidator: ActorRef = _
 
@@ -44,7 +47,7 @@ class HmdaFileValidatorSpec extends ActorSpec with BeforeAndAfterEach with HmdaF
   val e1 = SyntacticalValidationError("1", "S999", false)
   val e2 = ValidityValidationError("1", "V999", true)
   val e3 = QualityValidationError("1", "Q999", false)
-  val e4 = MacroValidationError("Q007", Nil)
+  val e4 = MacroValidationError("Q007")
 
   val ts = TsCsvParser(lines(0)).right.get
   val lars = lines.tail.map(line => LarCsvParser(line).right.get)
@@ -74,13 +77,17 @@ class HmdaFileValidatorSpec extends ActorSpec with BeforeAndAfterEach with HmdaF
         Seq(e2),
         Seq(e3),
         qualityVerified = false,
-        Seq(e4)
+        Seq(e4),
+        macroVerified = false
       ))
     }
 
     "read parsed data and validate it" in {
       probe.send(hmdaFileParser, TsParsed(ts))
-      lars.foreach(lar => probe.send(hmdaFileParser, LarParsed(lar)))
+      lars.foreach { lar =>
+        probe.send(hmdaFileParser, LarParsed(lar))
+        probe.expectMsg(Persisted)
+      }
       val hmdaFileValidator2 = createHmdaFileValidator(system, submissionId2)
       probe.send(hmdaFileParser, GetState)
       probe.expectMsg(HmdaFileParseState(5, Nil))
@@ -93,13 +100,19 @@ class HmdaFileValidatorSpec extends ActorSpec with BeforeAndAfterEach with HmdaF
       probe.expectMsg(HmdaFileValidationState(
         Some(ts),
         lars,
-        Nil,
+        List(
+          SyntacticalValidationError("38800009923", "S025", true)
+        ),
         Nil,
         Nil,
         List(
           SyntacticalValidationError("8299422144", "S020", false),
+          SyntacticalValidationError("8299422144", "S025", false),
+          SyntacticalValidationError("9471480396", "S025", false),
           SyntacticalValidationError("2185751599", "S010", false),
-          SyntacticalValidationError("2185751599", "S020", false)
+          SyntacticalValidationError("2185751599", "S020", false),
+          SyntacticalValidationError("2185751599", "S025", false),
+          SyntacticalValidationError("4977566612", "S025", false)
         ),
         List(
           ValidityValidationError("4977566612", "V550", false),
@@ -109,11 +122,12 @@ class HmdaFileValidatorSpec extends ActorSpec with BeforeAndAfterEach with HmdaF
         Nil,
         qualityVerified = false,
         List(
-          MacroValidationError("Q008", Nil),
-          MacroValidationError("Q010", Nil),
-          MacroValidationError("Q016", Nil),
-          MacroValidationError("Q023", Nil)
-        )
+          MacroValidationError("Q008"),
+          MacroValidationError("Q010"),
+          MacroValidationError("Q016"),
+          MacroValidationError("Q023")
+        ),
+        macroVerified = false
       ))
     }
 
@@ -130,12 +144,13 @@ class HmdaFileValidatorSpec extends ActorSpec with BeforeAndAfterEach with HmdaF
         Seq(e2),
         Seq(e3),
         qualityVerified = false,
-        Vector(e4)
+        Vector(e4),
+        macroVerified = false
       ))
 
       // send VerifyQualityEdits message
-      probe.send(hmdaFileValidator, VerifyQualityEdits(true))
-      probe.expectMsg(QualityEditsVerified(true))
+      probe.send(hmdaFileValidator, VerifyEdits(Quality, true))
+      probe.expectMsg(EditsVerified(Quality, true))
 
       // expect updated validation state
       probe.send(hmdaFileValidator, GetState)
@@ -149,14 +164,13 @@ class HmdaFileValidatorSpec extends ActorSpec with BeforeAndAfterEach with HmdaF
         Seq(e2),
         Seq(e3),
         qualityVerified = true,
-        Vector(e4)
+        Vector(e4),
+        macroVerified = false
       ))
     }
 
     "verify macro edits" in {
-      val j = MacroEditJustification(1, "Other", true, Some("text written by user"))
-      val justifications = Seq(j)
-      val e5 = e4.copy(justifications = justifications)
+      // establish baseline
       probe.send(hmdaFileValidator, GetState)
       probe.expectMsg(HmdaFileValidationState(
         Some(ts),
@@ -168,10 +182,15 @@ class HmdaFileValidatorSpec extends ActorSpec with BeforeAndAfterEach with HmdaF
         Seq(e2),
         Seq(e3),
         qualityVerified = true,
-        Vector(e4)
+        Vector(e4),
+        macroVerified = false
       ))
-      probe.send(hmdaFileValidator, JustifyMacroEdit("Q007", j))
-      probe.expectMsg(MacroEditJustified("Q007", j))
+
+      // send VerifyQualityEdits message
+      probe.send(hmdaFileValidator, VerifyEdits(Macro, true))
+      probe.expectMsg(EditsVerified(Macro, true))
+
+      // expect updated validation state
       probe.send(hmdaFileValidator, GetState)
       probe.expectMsg(HmdaFileValidationState(
         Some(ts),
@@ -183,9 +202,39 @@ class HmdaFileValidatorSpec extends ActorSpec with BeforeAndAfterEach with HmdaF
         Seq(e2),
         Seq(e3),
         qualityVerified = true,
-        Vector(e5)
+        Vector(e4),
+        macroVerified = true
       ))
     }
+
+    val tsS987 = SyntacticalValidationError("tsheet", "S987", true)
+    val larS987 = SyntacticalValidationError("lar", "S987", false)
+    val lars42: Seq[SyntacticalValidationError] = Seq.fill(42)(larS987)
+
+    "get paginated results for a single named edit" in {
+      //Setup: persist enough failures for S987 that pagination is necessary
+      val tsErrors = TsValidationErrors(Seq(tsS987))
+      val larErrors = LarValidationErrors(lars42)
+      probe.send(hmdaFileValidator, tsErrors)
+      probe.send(hmdaFileValidator, larErrors)
+
+      //First page should have errors 1 - 20
+      probe.send(hmdaFileValidator, GetNamedErrorResultsPaginated("S987", 1))
+      val pg1 = probe.expectMsgType[PaginatedErrors]
+      pg1.errors.size mustBe 20
+      pg1.errors.head mustBe tsS987
+
+      //Second page should have errors 21 - 40
+      probe.send(hmdaFileValidator, GetNamedErrorResultsPaginated("S987", 2))
+      val pg2 = probe.expectMsgType[PaginatedErrors]
+      pg2.errors.size mustBe 20
+
+      //Third page should have remaining errors (41 - 43)
+      probe.send(hmdaFileValidator, GetNamedErrorResultsPaginated("S987", 3))
+      val pg3 = probe.expectMsgType[PaginatedErrors]
+      pg3.errors.size mustBe 3
+    }
+
   }
 
 }

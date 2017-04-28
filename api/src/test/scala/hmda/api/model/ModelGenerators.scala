@@ -3,6 +3,7 @@ package hmda.api.model
 import java.util.Calendar
 
 import akka.http.scaladsl.model.Uri.Path
+import hmda.api.model.institutions.submissions.{ ContactSummary, FileSummary, RespondentSummary, SubmissionSummary }
 import hmda.api.model.public.InstitutionSearch
 import hmda.model.fi._
 import hmda.validation.engine._
@@ -47,7 +48,6 @@ trait ModelGenerators {
       Validating,
       ValidatedWithErrors,
       Validated,
-      IRSGenerated,
       Signed
     )
   }
@@ -66,7 +66,8 @@ trait ModelGenerators {
       status <- submissionStatusGen
       start <- Gen.choose(1483287071000L, 1514736671000L)
       end <- Gen.choose(1483287071000L, 1514736671000L)
-    } yield Submission(id, status, start, end)
+      receipt <- Gen.alphaStr
+    } yield Submission(id, status, start, end, receipt)
   }
 
   implicit def filingDetailGen: Gen[FilingDetail] = {
@@ -96,20 +97,6 @@ trait ModelGenerators {
       loanId <- Gen.alphaStr
       fields <- fieldsGen
     } yield EditResultRow(RowId(loanId), fields)
-  }
-
-  implicit def editResultGen: Gen[EditResult] = {
-    for {
-      edit <- Gen.alphaStr
-      description <- Gen.alphaStr
-      lars <- Gen.listOf(larEditResultGen)
-    } yield EditResult(edit, description, lars)
-  }
-
-  implicit def editResultsGen: Gen[EditResults] = {
-    for {
-      edits <- Gen.listOf(editResultGen)
-    } yield EditResults(edits)
   }
 
   implicit def validationErrorTypeGen: Gen[ValidationErrorType] = {
@@ -142,44 +129,40 @@ trait ModelGenerators {
     } yield QualityValidationError(id, name, ts)
   }
 
-  implicit def macroEditJustificationGen: Gen[MacroEditJustification] = {
-    for {
-      id <- Gen.choose(Int.MinValue, Int.MaxValue)
-      value <- Gen.alphaStr
-      verified <- Gen.oneOf(true, false)
-      text <- Gen.option(Gen.alphaStr)
-    } yield MacroEditJustification(id, value, verified, text)
-  }
-
-  implicit def macroEditJustificationWithNameGen: Gen[MacroEditJustificationWithName] = {
-    for {
-      edit <- Gen.alphaStr
-      justification <- macroEditJustificationGen
-    } yield MacroEditJustificationWithName(edit, justification)
-  }
-
   implicit def macroValidationErrorGen: Gen[MacroValidationError] = {
     for {
       id <- Gen.alphaStr
-      justifications <- Gen.listOf(macroEditJustificationGen)
-    } yield MacroValidationError(id, justifications)
+    } yield MacroValidationError(id)
   }
 
-  implicit def macroResultGen: Gen[MacroResult] = {
+  implicit def editInfoGen: Gen[EditInfo] = {
     for {
-      id <- Gen.alphaStr
-      justification <- Gen.listOf(macroEditJustificationGen)
-    } yield MacroResult(id, justification.toSet)
+      name <- Gen.alphaStr
+      desc <- Gen.alphaStr
+    } yield EditInfo(name, desc)
+  }
+
+  implicit def editCollectionGen: Gen[EditCollection] = {
+    for {
+      e <- Gen.listOf(editInfoGen)
+    } yield EditCollection(e)
+  }
+
+  implicit def verifiableEditCollectionGen: Gen[VerifiableEditCollection] = {
+    for {
+      b <- Gen.oneOf(true, false)
+      e <- Gen.listOf(editInfoGen)
+    } yield VerifiableEditCollection(b, e)
   }
 
   implicit def summaryEditResultsGen: Gen[SummaryEditResults] = {
     for {
-      s <- editResultsGen
-      v <- editResultsGen
-      qualVerified <- Gen.oneOf(true, false)
-      q <- Gen.listOf(editResultGen)
-      m <- Gen.listOf(macroResultGen)
-    } yield SummaryEditResults(s, v, QualityEditResults(qualVerified, q), MacroResults(m))
+      s <- editCollectionGen
+      v <- editCollectionGen
+      q <- verifiableEditCollectionGen
+      m <- verifiableEditCollectionGen
+      st <- submissionStatusGen
+    } yield SummaryEditResults(s, v, q, m, st)
   }
 
   implicit def institutionSearchGen: Gen[InstitutionSearch] = {
@@ -193,6 +176,39 @@ trait ModelGenerators {
 
   implicit def institutionSearchGenList: Gen[List[InstitutionSearch]] = {
     Gen.listOf(institutionSearchGen)
+  }
+
+  implicit def fileSummaryGen: Gen[FileSummary] = {
+    for {
+      name <- Gen.alphaStr
+      year <- Gen.alphaStr
+      totalLars <- Gen.choose(Int.MinValue, Int.MaxValue)
+    } yield FileSummary(name, year, totalLars)
+  }
+
+  implicit def contactSummaryGen: Gen[ContactSummary] = {
+    for {
+      name <- Gen.alphaStr
+      phone <- Gen.alphaStr
+      email <- Gen.alphaStr
+    } yield ContactSummary(name, phone, email)
+  }
+
+  implicit def respondentSummaryGen: Gen[RespondentSummary] = {
+    for {
+      name <- Gen.alphaStr
+      id <- Gen.alphaStr
+      taxId <- Gen.alphaStr
+      agency <- Gen.alphaStr
+      contact <- contactSummaryGen
+    } yield RespondentSummary(name, id, taxId, agency, contact)
+  }
+
+  implicit def submissionSummaryGen: Gen[SubmissionSummary] = {
+    for {
+      respondent <- respondentSummaryGen
+      file <- fileSummaryGen
+    } yield SubmissionSummary(respondent, file)
   }
 
 }

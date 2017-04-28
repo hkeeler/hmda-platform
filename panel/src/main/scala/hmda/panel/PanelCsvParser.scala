@@ -18,13 +18,13 @@ import hmda.persistence.HmdaSupervisor._
 import hmda.persistence.institutions.InstitutionPersistence
 import hmda.persistence.institutions.InstitutionPersistence.CreateInstitution
 import hmda.persistence.model.HmdaSupervisorActor.FindActorByName
-import hmda.query.DbConfiguration
+import hmda.query.DbConfiguration._
 import hmda.query.repository.institutions.InstitutionComponent
 import org.slf4j.LoggerFactory
 
 import scala.concurrent.Await
 
-object PanelCsvParser extends InstitutionComponent with DbConfiguration {
+object PanelCsvParser extends InstitutionComponent {
   implicit val system: ActorSystem = ActorSystem("hmda")
   implicit val materializer = ActorMaterializer()
   implicit val timeout: Timeout = Timeout(5.second)
@@ -45,11 +45,15 @@ object PanelCsvParser extends InstitutionComponent with DbConfiguration {
 
     val timeout = 5.seconds
 
+    println("Cleaning DB...")
+    Await.result(repository.dropSchema(), timeout)
+    println("Creating new schema...")
     Await.result(repository.createSchema(), timeout)
     val institutionPersistence = Await.result(institutionPersistenceF, timeout)
 
     val source = FileIO.fromPath(new File(args(0)).toPath)
 
+    println("Reading file...")
     source
       .via(Framing.delimiter(ByteString("\n"), maximumFrameLength = 1024, allowTruncation = true))
       .drop(1)

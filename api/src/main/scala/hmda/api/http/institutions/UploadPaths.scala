@@ -12,8 +12,9 @@ import akka.http.scaladsl.server.Directives._
 import akka.http.scaladsl.server._
 import akka.pattern.ask
 import akka.stream.ActorMaterializer
-import akka.stream.scaladsl.Framing
+import akka.stream.scaladsl.{ Framing, Sink }
 import akka.util.{ ByteString, Timeout }
+import hmda.api.EC
 import hmda.api.http.HmdaCustomDirectives
 import hmda.persistence.messages.CommonMessages._
 import hmda.api.protocol.processing.{ ApiErrorProtocol, InstitutionProtocol, SubmissionProtocol }
@@ -21,13 +22,13 @@ import hmda.model.fi.{ Created, Failed, Submission, SubmissionId, Uploaded }
 import hmda.persistence.HmdaSupervisor.{ FindProcessingActor, FindSubmissions }
 import hmda.persistence.institutions.SubmissionPersistence
 import hmda.persistence.institutions.SubmissionPersistence.GetSubmissionById
-import hmda.persistence.processing.HmdaRawFile.AddLine
-import hmda.persistence.processing.ProcessingMessages.{ CompleteUpload, StartUpload }
+import hmda.persistence.processing.HmdaRawFile.{ AddFileName, AddLine }
+import hmda.persistence.processing.ProcessingMessages.{ CompleteUpload, Persisted, StartUpload }
 import hmda.persistence.processing.SubmissionManager
 import hmda.query.HmdaQuerySupervisor.FindHmdaFilingView
 import hmda.query.projections.filing.HmdaFilingDBProjection.{ CreateSchema, DeleteLars }
 
-import scala.concurrent.{ ExecutionContext, Future }
+import scala.concurrent.ExecutionContext
 import scala.util.{ Failure, Success }
 
 trait UploadPaths extends InstitutionProtocol with ApiErrorProtocol with SubmissionProtocol with HmdaCustomDirectives {
@@ -37,10 +38,12 @@ trait UploadPaths extends InstitutionProtocol with ApiErrorProtocol with Submiss
 
   implicit val timeout: Timeout
 
+  implicit val flowParallelism: Int
+
   val splitLines = Framing.delimiter(ByteString("\n"), 2048, allowTruncation = true)
 
   // institutions/<institutionId>/filings/<period>/submissions/<seqNr>
-  def uploadPath(institutionId: String)(implicit ec: ExecutionContext) =
+  def uploadPath[_: EC](institutionId: String) =
     path("filings" / Segment / "submissions" / IntNumber) { (period, seqNr) =>
       timedPost { uri =>
         val submissionId = SubmissionId(institutionId, period, seqNr)
@@ -76,26 +79,28 @@ trait UploadPaths extends InstitutionProtocol with ApiErrorProtocol with Submiss
   private def uploadFile(processingActor: ActorRef, uploadTimestamp: Long, path: Path, submission: Submission): Route = {
     fileUpload("file") {
       case (metadata, byteSource) if metadata.fileName.endsWith(".txt") =>
+        processingActor ! AddFileName(metadata.fileName)
         processingActor ! StartUpload
         val uploadedF = byteSource
           .via(splitLines)
           .map(_.utf8String)
-          .runForeach(line => processingActor ! AddLine(uploadTimestamp, line))
+          .mapAsync(parallelism = flowParallelism)(line => (processingActor ? AddLine(uploadTimestamp, line)).mapTo[Persisted.type])
+          .runWith(Sink.ignore)
 
         onComplete(uploadedF) {
-          case Success(response) =>
+          case Success(_) =>
             processingActor ! CompleteUpload
             complete(ToResponseMarshallable(StatusCodes.Accepted -> submission.copy(status = Uploaded)))
           case Failure(error) =>
             processingActor ! Shutdown
             log.error(error.getLocalizedMessage)
             val errorResponse = Failed("Invalid File Format")
-            complete(ToResponseMarshallable(StatusCodes.BadRequest -> Submission(submission.id, errorResponse, 0L, 0L)))
+            complete(ToResponseMarshallable(StatusCodes.BadRequest -> Submission(submission.id, errorResponse)))
         }
       case _ =>
         processingActor ! Shutdown
         val errorResponse = Failed("Invalid File Format")
-        complete(ToResponseMarshallable(StatusCodes.BadRequest -> Submission(submission.id, errorResponse, 0L, 0L)))
+        complete(ToResponseMarshallable(StatusCodes.BadRequest -> Submission(submission.id, errorResponse)))
     }
   }
 }

@@ -1,17 +1,23 @@
 package hmda.persistence.processing
 
+import akka.pattern.ask
 import akka.actor.{ ActorRef, ActorSystem, Props }
 import akka.stream.scaladsl.{ Sink, Source }
+import akka.util.Timeout
+import com.typesafe.config.ConfigFactory
 import hmda.model.fi.SubmissionId
 import hmda.model.fi.lar.LoanApplicationRegister
 import hmda.model.fi.ts.TransmittalSheet
 import hmda.parser.fi.lar.{ LarCsvParser, LarParsingError }
 import hmda.parser.fi.ts.TsCsvParser
+import hmda.persistence.PaginatedResource
 import hmda.persistence.messages.CommonMessages._
 import hmda.persistence.model.HmdaPersistentActor
 import hmda.persistence.processing.HmdaQuery._
 import hmda.persistence.processing.HmdaRawFile.LineAdded
 import hmda.persistence.processing.ProcessingMessages._
+
+import scala.concurrent.duration._
 
 object HmdaFileParser {
 
@@ -23,12 +29,15 @@ object HmdaFileParser {
   case class TsParsedErrors(errors: List[String]) extends Event
   case class LarParsed(lar: LoanApplicationRegister) extends Event
   case class LarParsedErrors(errors: LarParsingError) extends Event
+  case class GetStatePaginated(page: Int)
 
   def props(id: SubmissionId): Props = Props(new HmdaFileParser(id))
 
   def createHmdaFileParser(system: ActorSystem, submissionId: SubmissionId): ActorRef = {
     system.actorOf(HmdaFileParser.props(submissionId))
   }
+
+  case class PaginatedFileParseState(tsParsingErrors: Seq[String], larParsingErrors: Seq[LarParsingError], totalErroredLines: Int)
 
   case class HmdaFileParseState(size: Int = 0, tsParsingErrors: Seq[String] = Nil, larParsingErrors: Seq[LarParsingError] = Nil) {
     def updated(event: Event): HmdaFileParseState = event match {
@@ -56,11 +65,18 @@ class HmdaFileParser(submissionId: SubmissionId) extends HmdaPersistentActor {
 
   override def persistenceId: String = s"$name-$submissionId"
 
+  val duration = 10.seconds
+  implicit val timeout = Timeout(duration)
+
+  val config = ConfigFactory.load()
+  val flowParallelism = config.getInt("hmda.actor-flow-parallelism")
+
   override def receiveCommand: Receive = {
 
     case ReadHmdaRawFile(persistenceId, replyTo: ActorRef) =>
 
       val parsedTs = events(persistenceId)
+        .filter { x => x.isInstanceOf[LineAdded] }
         .map { case LineAdded(_, data) => data }
         .take(1)
         .map(line => TsCsvParser(line))
@@ -75,6 +91,7 @@ class HmdaFileParser(submissionId: SubmissionId) extends HmdaPersistentActor {
         .runForeach(pTs => self ! pTs)
 
       val parsedLar = events(persistenceId)
+        .filter { x => x.isInstanceOf[LineAdded] }
         .map { case LineAdded(_, data) => data }
         .drop(1)
         .zip(Source.fromIterator(() => Iterator.from(2)))
@@ -87,6 +104,7 @@ class HmdaFileParser(submissionId: SubmissionId) extends HmdaPersistentActor {
         }
 
       parsedLar
+        .mapAsync(parallelism = flowParallelism)(x => (self ? x).mapTo[Persisted.type])
         .runWith(Sink.actorRef(self, FinishParsing(replyTo)))
 
     case tp @ TsParsed(ts) =>
@@ -105,12 +123,14 @@ class HmdaFileParser(submissionId: SubmissionId) extends HmdaPersistentActor {
       persist(lp) { e =>
         log.debug(s"Persisted: $e")
         updateState(e)
+        sender() ! Persisted
       }
 
     case larErr @ LarParsedErrors(errors) =>
       persist(larErr) { e =>
         log.debug(s"Persisted: $e")
         updateState(e)
+        sender() ! Persisted
       }
 
     case FinishParsing(replyTo) =>
@@ -121,6 +141,17 @@ class HmdaFileParser(submissionId: SubmissionId) extends HmdaPersistentActor {
 
     case GetState =>
       sender() ! state
+
+    case GetStatePaginated(page) =>
+      val tsErrState = state.tsParsingErrors
+      val tsLineError = if (tsErrState.isEmpty) 0 else 1
+      val tsErrorsReturn = if (page == 1) tsErrState else Seq()
+
+      val totalLarErrors: Int = state.larParsingErrors.size
+      val p = PaginatedResource(totalLarErrors, tsLineError)(page)
+      val larErrorsReturn = state.larParsingErrors.slice(p.fromIndex, p.toIndex)
+
+      sender() ! PaginatedFileParseState(tsErrorsReturn, larErrorsReturn, totalLarErrors + tsLineError)
 
     case Shutdown =>
       context stop self

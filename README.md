@@ -16,7 +16,7 @@ This repository contains the code for the entirety of the HMDA platform backend.
 
 The HMDA Platform is composed of the following modules:
 
-### Parser
+### Parser (JS/JVM)
 
 Module responsible for reading incoming data and making sure that it conforms to the HMDA File Specification
 
@@ -32,6 +32,21 @@ Module responsible for persisting information into the system. It becomes the sy
 
 This module contains both public APIs for HMDA data for general use by third party clients and web applications, as well as endpoints for receiving data and providing information about the filing process for Financial Institutions
 
+### Query
+
+This module is responsible for interacting with the back-end database, as well as conversion between model objects and database objects.
+
+### Panel
+
+This module is responsible for parsing and persisting a CSV-format panel file
+
+### Model (JS/JVM)
+
+This module is responsible for maintaining the objects used in our platform
+
+### Census
+
+This module is responsible for geographic translation (e.g. state number -> state code)
 
 ## Dependencies
 
@@ -52,6 +67,41 @@ In addition, you'll need Scala's interactive build tool [sbt](http://www.scala-s
 The HMDA Platform uses sbt's multi-project builds, each project representing a specific task.
 
 ### Interactive
+
+* The write side of this system is supported by either a local `leveldb` database or Cassandra. By default, the local `leveldb` is utilized, and some sample data is loaded automatically.
+If using `Cassandra` is desired, the following environment variable needs to be set:
+
+```shell
+export HDMA_IS_DEMO=false
+```
+
+The easiest way to run a Cassandra server to support this application for testing is to do it through Docker:
+
+```shell
+docker run --name cassandra -p 9042:9042 -p 7000:7000 -p 7199:7199 cassandra:3.10
+```
+
+If you want to connect to this server, the following `docker` command will give you access to the Cassandra instance started in the previous step:
+
+```shell
+docker run -it --link cassandra:cassandra --rm cassandra cqlsh cassandra
+```
+
+Once the `Cassandra` server is running, set the following environment variable to the appropriate Cassandra host (in this example, the default local docker host for a machine running MacOs X):
+
+```shell
+export CASSANDRA_CLUSTER_HOSTS=192.168.99.100
+```
+
+To load data into `Cassandra`, you can run the following (the Cassandra server needs to be running and correct environment variables configured as per the previous instructions):
+
+```shell
+$ sbt
+project panel
+run <full local path to sample file>
+```
+A sample file is located in the following folder: `hmda-platform/persistence/src/main/resources/demoInstitutions.csv`
+
 
 * In order to support the read side, a local PostgreSQL server is needed. Assuming it runs on the default port, on the same machine as the API, the following environment variable needs to be set:
 
@@ -120,10 +170,11 @@ docker build -t hmda-api .
 
 Then, run the docker image
 ```shell
-docker run -d -p "8080:8080" hmda-api
+docker run -d -p "8080:8080 -p 8082:8082" hmda-api
 ```
 
-The API will run on `$(docker-machine ip):8080`
+The Filing API will run on `$(docker-machine ip):8080`
+The Public API will run on `$(docker-machine ip):8082`
 
 #### To run the entire platform
 Clone the [HMDA Platform UI](https://github.com/cfpb/hmda-platform-ui) repo and the [HMDA Platform Auth](https://github.com/cfpb/hmda-platform-auth) repo into sibling directories of this one. Your directory structure should look like this:
@@ -137,12 +188,7 @@ drwxr-xr-x  25 lortone  staff   850B Jul 25 17:13 hmda-platform-ui/
 drwxr-xr-x  23 lortone  staff   796B Jul 28 17:15 hmda-platform-auth/
 ```
 
-From the _`hmda-platform-ui`'s_ root directory, run the following:
-
-```shell
-npm install
-npm run build
-```
+From the _`hmda-platform-ui`'s_ root directory, run `yarn`. (Get yarn [here](https://yarnpkg.com/lang/en/docs/install/) if you don't have it installed.)
 
 From _`hmda-platform`'s_ root directory, run the following:
 
@@ -162,20 +208,16 @@ docker-machine ip dev
 
 Then, visit the following URLS and click advanced -> proceed. This will bypass self-signed cert errors from your browser when running the app.
 
-```shell
-https://192.168.99.100:8443/
-https://192.168.99.100:4443/
-https://192.168.99.100:9443/
-```
+- https://192.168.99.100:8443/
+- https://192.168.99.100:4443/
+- https://192.168.99.100:9443/
 
-Visit the app at `http://192.168.99.100`, click the "Login" button, and click "Register" when redirected to the keycloak login screen.
+Visit the app at http://192.168.99.100, click the "Login" button, and click "Register" when redirected to the keycloak login screen.
 
-The sample data currently contains four institutions; Bank 0, Bank 1, Bank 2, and Bank 3. To register for any of these institutions you have to use the corresponding domain:
+To use demo data there are two institutions available; Bank 0 and Bank 1. To register for either of these institutions you have to use the corresponding domain:
 
 - Bank 0 = bank0.com
 - Bank 1 = bank1.com
-- Bank 2 = bank2.com
-- Bank 3 = bank3.com
 
 Confirm your signup via MailDev by visiting http://192.168.99.100:1080, opening the email, and clicking the verifying link.
 

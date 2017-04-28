@@ -5,9 +5,9 @@ import akka.http.scaladsl.model._
 import akka.http.scaladsl.model.headers.RawHeader
 import akka.http.scaladsl.server.Route
 import akka.pattern.ask
-import hmda.model.institution.Agency.{ CFPB, FDIC }
-import hmda.model.institution.ExternalIdType.{ RssdId, UndeterminedExternalId }
-import hmda.model.institution.InstitutionType.{ Bank, MBS }
+import hmda.model.institution.Agency.CFPB
+import hmda.model.institution.ExternalIdType.UndeterminedExternalId
+import hmda.model.institution.InstitutionType.MBS
 import hmda.model.institution._
 import hmda.persistence.institutions.InstitutionPersistence
 import hmda.persistence.institutions.InstitutionPersistence.CreateInstitution
@@ -81,7 +81,6 @@ class InstitutionsAuthSpec extends InstitutionHttpApiSpec {
       val parent = Parent("123", 123, "test parent", "", "")
       val topHolder = TopHolder(-1, "", "", "", "")
       val caseInsensitiveBank = Institution("1", CFPB, 2017, MBS, cra = true, Set(), Set(), respondent = respondent, hmdaFilerFlag = true, parent = parent, assets = 0, otherLenderCode = 0, topHolder = topHolder)
-      val supervisor = system.actorSelection("/user/supervisor")
       val querySupervisor = system.actorSelection("/user/query-supervisor")
       val fInstitutionsActor = (supervisor ? FindActorByName(InstitutionPersistence.name)).mapTo[ActorRef]
 

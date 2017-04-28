@@ -1,20 +1,20 @@
 package hmda.validation.engine.lar.`macro`
 
-import akka.actor.ActorSystem
-import akka.stream.ActorMaterializer
+import hmda.validation._
 import hmda.model.fi.lar.LoanApplicationRegister
 import hmda.validation.api.ValidationApi
+import hmda.validation.context.ValidationContext
 import hmda.validation.engine.lar.LarCommonEngine
 import hmda.validation.engine.{ Macro, ValidationErrorType }
 import hmda.validation.rules.AggregateEditCheck
 import hmda.validation.rules.lar.`macro`.MacroEditTypes.LoanApplicationRegisterSource
 import hmda.validation.rules.lar.`macro`._
 
-import scala.concurrent.{ ExecutionContext, Future }
+import scala.concurrent.Future
 
 trait LarMacroEngine extends LarCommonEngine with ValidationApi {
 
-  def checkMacro(larSource: LoanApplicationRegisterSource)(implicit system: ActorSystem, materializer: ActorMaterializer, ec: ExecutionContext): Future[LarSourceValidation] = {
+  def checkMacro[_: AS: MAT: EC](larSource: LoanApplicationRegisterSource, ctx: ValidationContext): Future[LarSourceValidation] = {
     Future.sequence(
       List(
         Q006,
@@ -22,6 +22,7 @@ trait LarMacroEngine extends LarCommonEngine with ValidationApi {
         Q008,
         Q009,
         Q010,
+        Q011.inContext(ctx),
         Q015,
         Q016,
         Q023,
@@ -50,12 +51,12 @@ trait LarMacroEngine extends LarCommonEngine with ValidationApi {
 
   }
 
-  private def checkAggregate(
+  private def checkAggregate[_: AS: MAT: EC](
     editCheck: AggregateEditCheck[LoanApplicationRegisterSource, LoanApplicationRegister],
     input: LoanApplicationRegisterSource,
     inputId: String,
     errorType: ValidationErrorType
-  )(implicit system: ActorSystem, materializer: ActorMaterializer, ec: ExecutionContext): Future[LarSourceValidation] = {
+  ): Future[LarSourceValidation] = {
     val fResult = editCheck(input)
     for {
       result <- fResult

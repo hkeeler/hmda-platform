@@ -10,12 +10,13 @@ import com.typesafe.config.ConfigFactory
 import hmda.model.fi._
 import hmda.model.util.FITestData._
 import hmda.persistence.HmdaSupervisor
-import hmda.persistence.HmdaSupervisor.{ FindFilings, FindProcessingActor }
-import hmda.persistence.institutions.FilingPersistence
+import hmda.persistence.HmdaSupervisor.{ FindFilings, FindProcessingActor, FindSubmissions }
+import hmda.persistence.institutions.{ FilingPersistence, SubmissionPersistence }
 import hmda.persistence.messages.CommonMessages.GetState
 import hmda.persistence.model.ActorSpec
-import hmda.persistence.processing.ProcessingMessages.{ CompleteUpload, StartUpload }
+import hmda.persistence.processing.ProcessingMessages.{ CompleteUpload, Persisted, StartUpload }
 import hmda.persistence.institutions.FilingPersistence._
+import hmda.persistence.institutions.SubmissionPersistence.CreateSubmission
 import hmda.persistence.processing.HmdaRawFile.AddLine
 
 import scala.concurrent.Await
@@ -32,8 +33,10 @@ class SubmissionManagerSpec extends ActorSpec {
   val supervisor = system.actorOf(HmdaSupervisor.props(), "supervisor")
   val fFilingPersistence = (supervisor ? FindFilings(FilingPersistence.name, submissionId.institutionId)).mapTo[ActorRef]
   val fSubmissionManager = (supervisor ? FindProcessingActor(SubmissionManager.name, submissionId)).mapTo[ActorRef]
+  val fSubmissionPersistence = (supervisor ? FindSubmissions(SubmissionPersistence.name, submissionId.institutionId, submissionId.period)).mapTo[ActorRef]
   val filingPersistence: ActorRef = Await.result(fFilingPersistence, 2.seconds)
   val submissionManager: ActorRef = Await.result(fSubmissionManager, 2.seconds)
+  val submissionPersistence: ActorRef = Await.result(fSubmissionPersistence, 2.seconds)
 
   val probe = TestProbe()
 
@@ -47,40 +50,60 @@ class SubmissionManagerSpec extends ActorSpec {
     probe.send(filingPersistence, CreateFiling(filing))
     probe.expectMsg(Some(filing))
 
+    // setup: create Submission object
+    probe.send(submissionPersistence, CreateSubmission)
+    probe.expectMsgType[Some[Submission]]
+
     "Filing status begins as 'not started'" in {
-      expectedFiling.status mustBe NotStarted
+      val filing = expectedFiling
+      filing.status mustBe NotStarted
+      filing.start mustBe 0
     }
 
     "have Filing status 'in progress' and a 'start' time after StartUpload event" in {
       probe.send(submissionManager, StartUpload)
-      Thread.sleep(200)
+      probe.send(submissionManager, GetState)
+      probe.expectMsg(Uploading)
 
       val filing = expectedFiling
       filing.status mustBe InProgress
-      (filing.start == 0) mustBe false
+      filing.start must not be 0
       filing.end mustBe 0
+    }
+
+    "not update filing status if signature fails" in {
+      probe.send(submissionManager, hmda.persistence.processing.ProcessingMessages.Signed)
+      probe.expectMsg(None)
+      probe.send(submissionManager, GetState)
+      probe.expectMsg(Uploading)
+
+      val filing = expectedFiling
+      filing.status mustBe InProgress
     }
 
     "upload, parse and validate" in {
       for (line <- lines) {
         probe.send(submissionManager, AddLine(timestamp, line.toString))
+        probe.expectMsg(Persisted)
       }
 
       probe.send(submissionManager, CompleteUpload)
       probe.send(submissionManager, GetState)
-      //probe.expectMsg(Uploaded)
-      Thread.sleep(5000) //TODO: can this be avoided?
+      probe.expectMsg(Uploaded)
+      Thread.sleep(4000) //TODO: can this be avoided?
       probe.send(submissionManager, GetState)
-      //probe.expectMsg(ValidatedWithErrors)
+      probe.expectMsg(ValidatedWithErrors)
     }
 
     "have Filing status 'completed' after signature" in {
-      probe.send(submissionManager, Signed)
-      Thread.sleep(200)
+      probe.send(submissionManager, hmda.persistence.processing.ProcessingMessages.Signed)
+      probe.expectMsg(Some(Signed))
+      probe.send(submissionManager, GetState)
+      probe.expectMsg(Signed)
 
-      //val filing = expectedFiling
-      //filing.status mustBe Completed
-      //(filing.end == 0) mustBe false
+      val filing = expectedFiling
+      filing.status mustBe Completed
+      filing.end must not be 0
     }
 
   }

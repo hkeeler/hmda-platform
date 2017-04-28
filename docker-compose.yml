@@ -17,9 +17,18 @@ services:
 
 
   ui:
-    build: ../hmda-platform-ui
-    #volumes:
-    #  - ../hmda-platform-ui/dist:/usr/src/app/dist
+    build:
+      context: ../hmda-platform-ui
+      args:
+        SKIP_JS_BUILD: 1
+    ports:
+      - "80:80"
+    depends_on:
+      - api
+      - auth_proxy
+      - keycloak
+    volumes:
+      - ../hmda-platform-ui/dist:/usr/src/app/dist
     environment:
       APP_URL: 'https://192.168.99.100'
       HMDA_API: 'https://192.168.99.100:4443/hmda'

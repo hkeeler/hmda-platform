@@ -14,26 +14,26 @@ import hmda.persistence.demo.DemoData
 import hmda.persistence.institutions.InstitutionPersistence
 import hmda.persistence.model.HmdaSupervisorActor.FindActorByName
 import hmda.persistence.processing.SingleLarValidation
-import hmda.query.projections.institutions.InstitutionDBProjection.{ CreateSchema, DeleteSchema, _ }
+import hmda.query.projections.institutions.InstitutionDBProjection.{ CreateSchema, _ }
 import hmda.query.view.institutions.InstitutionView
-import hmda.persistence.messages.events.institutions.InstitutionEvents.{ InstitutionSchemaCreated, InstitutionSchemaDeleted }
+import hmda.persistence.messages.events.institutions.InstitutionEvents.InstitutionSchemaCreated
 import hmda.query.view.messages.CommonViewMessages.GetProjectionActorRef
 import org.slf4j.LoggerFactory
 import hmda.future.util.FutureRetry._
-import hmda.query.DbConfiguration
+import hmda.query.DbConfiguration._
 import hmda.query.projections.filing.HmdaFilingDBProjection._
+import hmda.validation.ValidationStats
+import hmda.api.HmdaConfig._
 
-import scala.concurrent.{ ExecutionContext, Future }
+import scala.concurrent.ExecutionContext
 
-object HmdaPlatform extends DbConfiguration {
-
-  val configFactory = ConfigFactory.load()
+object HmdaPlatform {
 
   val log = LoggerFactory.getLogger("hmda")
 
   def main(args: Array[String]): Unit = {
 
-    val system = ActorSystem("hmda")
+    val system = ActorSystem("hmda", configuration)
     val supervisor = createSupervisor(system)
     val querySupervisor = createQuerySupervisor(system)
     implicit val ec = system.dispatcher
@@ -52,16 +52,16 @@ object HmdaPlatform extends DbConfiguration {
     }
 
     val larRepository = new LarRepository(config)
-    val larTotalsRepository = new LarTotalRepository(config)
+    val larTotalMsaRepository = new LarTotalMsaRepository(config)
     val institutionRepository = new InstitutionRepository(config)
 
     larRepository.dropSchema()
-    larTotalsRepository.dropSchema()
+    larTotalMsaRepository.dropSchema()
     institutionRepository.dropSchema()
   }
 
-  private def startActors(system: ActorSystem, supervisor: ActorRef, querySupervisor: ActorRef)(implicit ec: ExecutionContext): Unit = {
-    lazy val actorTimeout = configFactory.getInt("hmda.actor.timeout")
+  private def startActors[_: EC](system: ActorSystem, supervisor: ActorRef, querySupervisor: ActorRef): Unit = {
+    lazy val actorTimeout = configuration.getInt("hmda.actor.timeout")
     implicit val timeout = Timeout(actorTimeout.seconds)
 
     (supervisor ? FindActorByName(SingleLarValidation.name))
@@ -80,8 +80,11 @@ object HmdaPlatform extends DbConfiguration {
     val institutionViewF = (querySupervisor ? FindActorByName(InstitutionView.name))
       .mapTo[ActorRef]
 
+    // Start validation stats actor
+    system.actorOf(ValidationStats.props(), "validation-stats")
+
     //Load demo data
-    lazy val isDemo = configFactory.getBoolean("hmda.isDemo")
+    lazy val isDemo = configuration.getBoolean("hmda.isDemo")
     if (isDemo) {
       cleanup()
       implicit val scheduler = system.scheduler

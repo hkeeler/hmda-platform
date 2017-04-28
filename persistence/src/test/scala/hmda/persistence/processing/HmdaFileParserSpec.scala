@@ -2,8 +2,8 @@ package hmda.persistence.processing
 
 import java.time.Instant
 
-import akka.actor.{ ActorRef, ActorSystem }
-import akka.testkit.{ EventFilter, TestProbe }
+import akka.actor.ActorRef
+import akka.testkit.TestProbe
 import org.scalatest.BeforeAndAfterEach
 import com.typesafe.config.ConfigFactory
 import hmda.model.fi.SubmissionId
@@ -13,7 +13,7 @@ import hmda.persistence.messages.CommonMessages.GetState
 import hmda.persistence.model.ActorSpec
 import hmda.persistence.processing.HmdaFileParser._
 import hmda.persistence.processing.HmdaRawFile._
-import hmda.persistence.processing.ProcessingMessages.{ CompleteUpload, ParsingCompleted, ParsingCompletedWithErrors, UploadCompleted }
+import hmda.persistence.processing.ProcessingMessages._
 
 class HmdaFileParserSpec extends ActorSpec with BeforeAndAfterEach with HmdaFileParserSpecUtils {
   import hmda.model.util.FITestData._
@@ -45,7 +45,7 @@ class HmdaFileParserSpec extends ActorSpec with BeforeAndAfterEach with HmdaFile
     "persist TS parsing errors" in {
       parseTs(badLines)
       probe.send(hmdaFileParser, GetState)
-      probe.expectMsg(HmdaFileParseState(0, Seq("Timestamp is not a Long"), Nil))
+      probe.expectMsg(HmdaFileParseState(0, Seq("Timestamp is not an integer"), Nil))
     }
 
     "persist parsed LARs" in {
@@ -57,7 +57,7 @@ class HmdaFileParserSpec extends ActorSpec with BeforeAndAfterEach with HmdaFile
     "persist parsed LARs and parsing errors" in {
       parseLars(hmdaFileParser, probe, badLines)
       probe.send(hmdaFileParser, GetState)
-      probe.expectMsg(HmdaFileParseState(2, Nil, Seq(LarParsingError(0, List("Agency Code is not an Integer")))))
+      probe.expectMsg(HmdaFileParseState(2, Nil, Seq(LarParsingError(0, List("Agency Code is not an integer")))))
     }
 
     "read entire raw file" in {
@@ -66,6 +66,7 @@ class HmdaFileParserSpec extends ActorSpec with BeforeAndAfterEach with HmdaFile
       val hmdaRawFile = createHmdaRawFile(system, submissionId2)
       for (line <- lines) {
         probe.send(hmdaRawFile, AddLine(timestamp, line.toString))
+        probe.expectMsg(Persisted)
       }
 
       probe.send(hmdaRawFile, CompleteUpload)
@@ -89,6 +90,7 @@ class HmdaFileParserSpec extends ActorSpec with BeforeAndAfterEach with HmdaFile
       // setup: persist raw lines
       for (line <- badLines) {
         probe.send(rawFileActor, AddLine(timestamp, line))
+        probe.expectMsg(Persisted)
       }
 
       probe.send(rawFileActor, CompleteUpload)
@@ -100,6 +102,38 @@ class HmdaFileParserSpec extends ActorSpec with BeforeAndAfterEach with HmdaFile
       probe.send(parserActor, ReadHmdaRawFile(s"${HmdaRawFile.name}-$submissionId3", probe.testActor))
       probe.expectMsg(ParsingCompletedWithErrors(submissionId3))
 
+    }
+
+    "get paginated results with GetStatePaginated(page)" in {
+      // Setup: persist enough errors that pagination is necessary
+      val tsErrors = List("TS 1", "TS 2")
+      probe.send(hmdaFileParser, TsParsedErrors(tsErrors))
+      1.to(42).foreach { i =>
+        val err = LarParsingError(i, List(s"$i"))
+        probe.send(hmdaFileParser, LarParsedErrors(err))
+        probe.expectMsg(Persisted)
+      }
+
+      // First page should have TS errors and 19 LAR errors (20 rows' errors total)
+      probe.send(hmdaFileParser, GetStatePaginated(1))
+      val page1 = probe.expectMsgType[PaginatedFileParseState]
+      page1.tsParsingErrors mustBe tsErrors
+      page1.larParsingErrors.size mustBe 19
+      page1.larParsingErrors.head.lineNumber mustBe 1
+
+      // Second page should have 20 LAR errors
+      probe.send(hmdaFileParser, GetStatePaginated(2))
+      val page2 = probe.expectMsgType[PaginatedFileParseState]
+      page2.tsParsingErrors mustBe Seq()
+      page2.larParsingErrors.size mustBe 20
+      page2.larParsingErrors.head.lineNumber mustBe 20
+
+      // Third page should have the last 3 LAR errors
+      probe.send(hmdaFileParser, GetStatePaginated(3))
+      val page3 = probe.expectMsgType[PaginatedFileParseState]
+      page3.tsParsingErrors mustBe Seq()
+      page3.larParsingErrors.size mustBe 3
+      page3.larParsingErrors.head.lineNumber mustBe 40
     }
 
   }

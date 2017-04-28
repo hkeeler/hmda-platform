@@ -1,14 +1,14 @@
 package hmda.query.repository.institutions
 
 import hmda.model.institution.InstitutionGenerators
-import hmda.query.DbConfiguration
+import hmda.query.DbConfiguration._
 
 import scala.concurrent.duration._
-import org.scalatest.{ AsyncWordSpec, BeforeAndAfterEach, MustMatchers }
+import org.scalatest.{ AsyncWordSpec, BeforeAndAfterAll, BeforeAndAfterEach, MustMatchers }
 
 import scala.concurrent.Await
 
-class InstitutionComponentSpec extends AsyncWordSpec with MustMatchers with InstitutionComponent with DbConfiguration with BeforeAndAfterEach {
+class InstitutionComponentSpec extends AsyncWordSpec with MustMatchers with InstitutionComponent with BeforeAndAfterAll {
 
   import InstitutionConverter._
 
@@ -16,23 +16,23 @@ class InstitutionComponentSpec extends AsyncWordSpec with MustMatchers with Inst
 
   val repository = new InstitutionRepository(config)
 
-  override def beforeEach(): Unit = {
-    super.beforeEach()
+  override def beforeAll(): Unit = {
+    super.beforeAll()
     Await.result(repository.createSchema(), timeout)
   }
 
-  override def afterEach(): Unit = {
-    super.afterEach()
+  override def afterAll(): Unit = {
+    super.afterAll()
     Await.result(repository.dropSchema(), timeout)
   }
 
   "Institution Repository" must {
     "insert new records" in {
-      val i = InstitutionGenerators.institutionGen.sample.get
+      val i = InstitutionGenerators.sampleInstitution
       repository.insertOrUpdate(i).map(x => x mustBe 1)
     }
     "modify records and read them back" in {
-      val i = InstitutionGenerators.institutionGen.sample.get.copy(cra = false)
+      val i = InstitutionGenerators.sampleInstitution.copy(cra = false)
       repository.insertOrUpdate(i).map(x => x mustBe 1)
       val modified = i.copy(cra = true)
       repository.insertOrUpdate(modified).map(x => x mustBe 1)
@@ -42,7 +42,7 @@ class InstitutionComponentSpec extends AsyncWordSpec with MustMatchers with Inst
       }
     }
     "delete record" in {
-      val i = InstitutionGenerators.institutionGen.sample.get
+      val i = InstitutionGenerators.sampleInstitution
       repository.insertOrUpdate(i).map(x => x mustBe 1)
       repository.findById(i.id).map {
         case Some(x) => succeed

@@ -47,11 +47,29 @@ class SubmissionFSMSpec extends ActorSpec {
       probe.expectMsg(NonEmptySubmissionData(Submission(submissionId, hmda.model.fi.Validated)))
 
       probe.send(fsm, Sign)
+      probe.expectMsg(Some(hmda.model.fi.Signed))
       probe.send(fsm, GetState)
       probe.expectMsg(NonEmptySubmissionData(Submission(submissionId, hmda.model.fi.Signed)))
 
       system stop fsm
 
+    }
+    "respond with None for invalid state transition" in {
+      val subId = SubmissionId("instId", "period", 4)
+      val fsm = createSubmissionFSM(system, subId)
+
+      probe.send(fsm, Create)
+      probe.send(fsm, GetState)
+      probe.expectMsg(NonEmptySubmissionData(Submission(subId, hmda.model.fi.Created)))
+
+      // Cannot sign a submission that isn't in state Validated or ValidatedWithErrors
+      probe.send(fsm, Sign)
+      probe.expectMsg(None)
+
+      probe.send(fsm, GetState)
+      probe.expectMsg(NonEmptySubmissionData(Submission(subId, hmda.model.fi.Created)))
+
+      system stop fsm
     }
     "recover persisted state" in {
       val fsm = actorRef()

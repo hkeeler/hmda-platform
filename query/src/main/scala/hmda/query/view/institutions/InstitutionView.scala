@@ -15,6 +15,7 @@ import hmda.persistence.processing.HmdaQuery._
 import hmda.query.model.ViewMessages.StreamCompleted
 import hmda.query.projections.institutions.InstitutionDBProjection
 import hmda.query.view.messages.CommonViewMessages._
+import hmda.persistence.PersistenceConfig._
 
 object InstitutionView {
 
@@ -54,8 +55,7 @@ class InstitutionView extends HmdaPersistentActor {
 
   val queryProjector = context.actorOf(InstitutionDBProjection.props(), "institution-projection")
 
-  val conf = ConfigFactory.load()
-  val snapshotCounter = conf.getInt("hmda.journal.snapshot.counter")
+  val snapshotCounter = configuration.getInt("hmda.journal.snapshot.counter")
 
   override def persistenceId: String = name
 
@@ -68,7 +68,7 @@ class InstitutionView extends HmdaPersistentActor {
       val institutions = state.institutions.filter(i => ids.contains(i.id))
       sender() ! institutions
 
-    case EventWithSeqNr(seqNr, event) =>
+    case EventWithSeqNr(_, event) =>
       if (counter >= snapshotCounter) {
         counter = 0
         saveSnapshot(state)
@@ -87,7 +87,7 @@ class InstitutionView extends HmdaPersistentActor {
       sender() ! state.institutions
 
     case FindInstitutionByPeriodAndDomain(domain) =>
-      sender() ! state.institutions.filter(i => i.emailDomains.map(e => extractDomain(e)).contains(domain))
+      sender() ! state.institutions.filter(i => i.emailDomains.map(e => extractDomain(e)).contains(domain.toLowerCase))
 
   }
 
@@ -111,9 +111,9 @@ class InstitutionView extends HmdaPersistentActor {
   private def extractDomain(email: String): String = {
     val parts = email.split("@")
     if (parts.length > 1)
-      parts(1)
+      parts(1).toLowerCase
     else
-      ""
+      parts(0).toLowerCase
   }
 
 }

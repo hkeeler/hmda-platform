@@ -1,6 +1,7 @@
 package hmda.api.protocol.processing
 
-import hmda.api.model.{ MacroEditJustificationWithName, ModelGenerators }
+import hmda.api.model.institutions.submissions.SubmissionSummary
+import hmda.api.model.ModelGenerators
 import hmda.model.fi.Submission
 import org.scalatest.{ MustMatchers, PropSpec }
 import org.scalatest.prop.PropertyChecks
@@ -25,45 +26,43 @@ class SubmissionProtocolSpec extends PropSpec with PropertyChecks with MustMatch
           )),
           ("status", JsObject(
             ("code", JsNumber(s.status.code)),
-            ("message", JsString(s.status.message))
+            ("message", JsString(s.status.message)),
+            ("description", JsString(s.status.description))
           )),
+          ("receipt", JsString(s.receipt)),
           ("start", JsNumber(s.start)),
           ("end", JsNumber(s.end))
         )
     }
   }
 
-  property("Macro edit justfication must convert to and from json") {
-    forAll(macroEditJustificationWithNameGen) { m =>
-      m.toJson.convertTo[MacroEditJustificationWithName] mustBe m
+  property("Submission Summary must convert to and from json") {
+    forAll(submissionSummaryGen) { s =>
+      s.toJson.convertTo[SubmissionSummary] mustBe s
     }
   }
 
-  property("Macro edit justification JSON must be in correct format") {
-    forAll(macroEditJustificationWithNameGen) { m =>
-      m.justification.text match {
-        case None =>
-          m.toJson mustBe
-            JsObject(
-              ("edit", JsString(m.edit)),
-              ("justification", JsObject(
-                ("id", JsNumber(m.justification.id)),
-                ("value", JsString(m.justification.value)),
-                ("verified", JsBoolean(m.justification.verified))
-              ))
-            )
-        case Some(t) =>
-          m.toJson mustBe
-            JsObject(
-              ("edit", JsString(m.edit)),
-              ("justification", JsObject(
-                ("id", JsNumber(m.justification.id)),
-                ("value", JsString(m.justification.value)),
-                ("verified", JsBoolean(m.justification.verified)),
-                ("text", JsString(t))
-              ))
-            )
-      }
+  property("Submission Summary must be correct format") {
+    forAll(submissionSummaryGen) { s =>
+      s.toJson mustBe
+        JsObject(
+          ("respondent", JsObject(
+            ("name", JsString(s.respondent.name)),
+            ("id", JsString(s.respondent.id)),
+            ("taxId", JsString(s.respondent.taxId)),
+            ("agency", JsString(s.respondent.agency)),
+            ("contact", JsObject(
+              ("name", JsString(s.respondent.contact.name)),
+              ("phone", JsString(s.respondent.contact.phone)),
+              ("email", JsString(s.respondent.contact.email))
+            ))
+          )),
+          ("file", JsObject(
+            ("name", JsString(s.file.name)),
+            ("year", JsString(s.file.year)),
+            ("totalLARS", JsNumber(s.file.totalLARS))
+          ))
+        )
     }
   }
 

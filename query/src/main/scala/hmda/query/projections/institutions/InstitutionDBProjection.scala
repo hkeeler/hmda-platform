@@ -5,12 +5,12 @@ import akka.pattern.pipe
 import hmda.persistence.messages.CommonMessages.Command
 import hmda.persistence.messages.events.institutions.InstitutionEvents._
 import hmda.persistence.model.HmdaActor
-import hmda.query.DbConfiguration
+import hmda.query.DbConfiguration._
 import hmda.query.repository.institutions.InstitutionComponent
 
 import scala.concurrent.ExecutionContext
 
-object InstitutionDBProjection extends InstitutionComponent with DbConfiguration {
+object InstitutionDBProjection extends InstitutionComponent {
 
   val repository = new InstitutionRepository(config)
 
@@ -44,7 +44,7 @@ class InstitutionDBProjection extends HmdaActor {
     case event: InstitutionEvent => event match {
       case InstitutionCreated(i) =>
         val query = toInstitutionQuery(i)
-        log.info(s"Created: $query")
+        log.debug(s"Created: $query")
         repository.insertOrUpdate(query)
           .map { x =>
             InstitutionInserted(x)
@@ -52,7 +52,7 @@ class InstitutionDBProjection extends HmdaActor {
 
       case InstitutionModified(i) =>
         val query = toInstitutionQuery(i)
-        log.info(s"Modified: $query")
+        log.debug(s"Modified: $query")
         repository.update(query)
           .map(x => InstitutionUpdated(x)) pipeTo sender()
     }

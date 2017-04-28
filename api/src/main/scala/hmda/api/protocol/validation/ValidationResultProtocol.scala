@@ -14,7 +14,7 @@ trait ValidationResultProtocol extends DefaultJsonProtocol {
           case "quality" => Quality
           case "macro" => Macro
         }
-        case _ => throw new DeserializationException("ValidationErrorType expected")
+        case _ => throw DeserializationException("ValidationErrorType expected")
       }
     }
     override def write(errorType: ValidationErrorType): JsValue = {
@@ -33,7 +33,7 @@ trait ValidationResultProtocol extends DefaultJsonProtocol {
       case JsString("validity") => validityValidationErrorFormat.read(json)
       case JsString("quality") => qualityValidationErrorFormat.read(json)
       case JsString("macro") => macroValidationErrorFormat.read(json)
-      case _ => throw new DeserializationException("ValidationError expected")
+      case _ => throw DeserializationException("ValidationError expected")
     }
     override def write(error: ValidationError): JsValue = error.errorType match {
       case Syntactical => syntacticalValidationErrorFormat.write(error.asInstanceOf[SyntacticalValidationError])
@@ -43,11 +43,10 @@ trait ValidationResultProtocol extends DefaultJsonProtocol {
     }
   }
 
-  implicit val macroEditJustificationFormat = jsonFormat4(MacroEditJustification.apply)
   implicit val syntacticalValidationErrorFormat = jsonFormat3(SyntacticalValidationError.apply)
   implicit val validityValidationErrorFormat = jsonFormat3(ValidityValidationError.apply)
   implicit val qualityValidationErrorFormat = jsonFormat3(QualityValidationError.apply)
-  implicit val macroValidationErrorFormat = jsonFormat2(MacroValidationError.apply)
+  implicit val macroValidationErrorFormat = jsonFormat1(MacroValidationError.apply)
   implicit val larValidationErrorsFormat = jsonFormat1(LarValidationErrors.apply)
   implicit val tsValidationErrorsFormat = jsonFormat1(TsValidationErrors.apply)
   implicit val validationErrorsSummaryFormat = jsonFormat1(ValidationErrorsSummary.apply)

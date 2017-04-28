@@ -11,6 +11,7 @@ import akka.stream.ActorMaterializer
 import akka.util.Timeout
 import com.typesafe.config.ConfigFactory
 import hmda.api.http.{ BaseHttpApi, HmdaCustomDirectives, InstitutionsHttpApi, LarHttpApi }
+import hmda.api.HmdaConfig._
 import scala.concurrent.duration._
 import scala.concurrent.{ ExecutionContext, Future }
 
@@ -25,15 +26,15 @@ class HmdaFilingApi
     with InstitutionsHttpApi
     with HmdaCustomDirectives {
 
-  val config = ConfigFactory.load()
+  implicit val flowParallelism = configuration.getInt("hmda.actor-flow-parallelism")
 
   override val name = "hmda-filing-api"
 
-  lazy val httpTimeout = config.getInt("hmda.http.timeout")
+  lazy val httpTimeout = configuration.getInt("hmda.http.timeout")
   implicit val timeout = Timeout(httpTimeout.seconds)
 
-  override lazy val host = config.getString("hmda.http.host")
-  override lazy val port = config.getInt("hmda.http.port")
+  override lazy val host = configuration.getString("hmda.http.host")
+  override lazy val port = configuration.getInt("hmda.http.port")
 
   implicit val system: ActorSystem = context.system
   override implicit val materializer: ActorMaterializer = ActorMaterializer()
